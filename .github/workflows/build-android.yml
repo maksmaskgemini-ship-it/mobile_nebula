@@ -26,18 +26,24 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Install Flutter 3.29.0
+      - name: Install Flutter 3.24.1
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.29.0'
+          flutter-version: '3.24.1'
           channel: 'stable'
 
-      - name: Install dependencies and gomobile
+      - name: Install gomobile
         run: |
           go install golang.org/x/mobile/cmd/gomobile@latest
           gomobile init
-          flutter pub get
-          touch env.sh
+
+      - name: Generate native artifacts (mobileNebula.aar)
+        run: |
+          chmod +x gen-artifacts.sh
+          ./gen-artifacts.sh android
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
 
       - name: Build Android APK
         run: flutter build apk --debug
