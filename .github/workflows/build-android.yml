@@ -1,0 +1,36 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch: # Разрешает ручной запуск
+  push:
+    branches: [ main, master ] # Запускает при изменении кода в этих ветках
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Android APK
+        run: flutter build apk --debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-nebula-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
