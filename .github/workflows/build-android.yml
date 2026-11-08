@@ -45,15 +45,7 @@ jobs:
       - name: Create libs directory
         run: mkdir -p android/app/src/main/libs
 
-      - name: Install Flutter dependencies
-        run: flutter pub get
-
-      - name: Generate native artifacts
-        run: |
-          chmod +x gen-artifacts.sh
-          ./gen-artifacts.sh android
-
-      # ⬇️ АВТО-ИСПРАВЛЕНИЕ КОДА (тебе не нужно ничего искать) ⬇️
+      # 1. АВТО-ИСПРАВЛЕНИЕ ОШИБКИ onReorder
       - name: Auto-patch Flutter source (fix onReorderItem)
         run: |
           find lib -name "*.dart" -exec sed -i 's/onReorderItem:/onReorder:/g' {} +
@@ -70,6 +62,51 @@ jobs:
                       with open(path, 'w', encoding='utf-8') as f:
                           f.write(content)
           "
+
+      # 2. ВСТРАИВАЕМ ИИ-АГЕНТА (Кнопка в шапку)
+      - name: Inject AI Agent
+        run: |
+          python3 -c "
+          import os
+          # Добавляем url_launcher в pubspec.yaml
+          with open('pubspec.yaml', 'r', encoding='utf-8') as f: pubspec = f.read()
+          if 'url_launcher' not in pubspec:
+              pubspec = pubspec.replace('dependencies:', 'dependencies:\n  url_launcher: ^6.2.5')
+              with open('pubspec.yaml', 'w', encoding='utf-8') as f: f.write(pubspec)
+
+          # Патчим главный экран
+          p = 'lib/screens/main_screen.dart'
+          if os.path.exists(p):
+              with open(p, 'r', encoding='utf-8') as f: c = f.read()
+              if 'url_launcher' not in c:
+                  c = c.replace(\"import 'package:flutter/material.dart';\", \"import 'package:flutter/material.dart';\nimport 'package:url_launcher/url_launcher.dart';\")
+              
+              # Пытаемся добавить в существующие actions
+              if 'actions: [' in c:
+                  c = c.replace('actions: [', '''actions: [
+                    IconButton(
+                      icon: const Icon(Icons.smart_toy),
+                      onPressed: () => launchUrl(Uri.parse('http://100.73.128.2:8000/app/')),
+                    ),''')
+              else:
+                  # Если actions нет, добавляем в AppBar
+                  c = c.replace('AppBar(', '''AppBar(
+                    actions: [
+                      IconButton(
+                        icon: const Icon(Icons.smart_toy),
+                        onPressed: () => launchUrl(Uri.parse('http://100.73.128.2:8000/app/')),
+                      ),
+                    ],''')
+              with open(p, 'w', encoding='utf-8') as f: f.write(c)
+          "
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Generate native artifacts
+        run: |
+          chmod +x gen-artifacts.sh
+          ./gen-artifacts.sh android
 
       - name: Build Android APK
         run: flutter build apk --debug
