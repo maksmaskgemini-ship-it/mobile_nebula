@@ -26,10 +26,11 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Install Flutter 3.29.0
+      # ⬇️ ИЗМЕНЕНИЕ ЗДЕСЬ: Flutter 3.38.9 даёт Dart 3.10.8
+      - name: Install Flutter 3.38.9
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.29.0'
+          flutter-version: '3.38.9'
           channel: 'stable'
 
       - name: Install NDK 27.0.12077973
