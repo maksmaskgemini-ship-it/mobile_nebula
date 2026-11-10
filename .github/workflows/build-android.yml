@@ -48,7 +48,7 @@ jobs:
       - name: Create libs directory
         run: mkdir -p android/app/src/main/libs
 
-      - name: Auto-patch Flutter source (fix onReorderItem)
+      - name: Auto-patch Flutter source
         run: |
           find lib -name "*.dart" -exec sed -i 's/onReorderItem:/onReorder:/g' {} +
           python3 -c "
@@ -174,49 +174,61 @@ jobs:
 
       - name: Inject AI Agent, Sensors and Manifest Fix
         run: |
-          python3 -c "
+          cat << 'PYEOF' > patch_app.py
           import os
-          
-          # 1. Обновляем pubspec.yaml
-          with open('pubspec.yaml', 'r', encoding='utf-8') as f: pubspec = f.read()
+          import re
+
+          # 1. Patch pubspec.yaml
+          with open('pubspec.yaml', 'r', encoding='utf-8') as f:
+              pubspec = f.read()
           if 'url_launcher' not in pubspec:
               pubspec = pubspec.replace('dependencies:', 'dependencies:\n  url_launcher: ^6.2.5\n  web_socket_channel: ^2.4.0')
-              with open('pubspec.yaml', 'w', encoding='utf-8') as f: f.write(pubspec)
-          
-          # 2. Патчим main.dart (ГЛАВНЫЙ ФАЙЛ)
-          main_path = 'lib/main.dart'
-          if os.path.exists(main_path):
-              with open(main_path, 'r', encoding='utf-8') as f: c = f.read()
-              if 'PhysicalBridge' not in c:
-                  c = c.replace(\"import 'package:flutter/material.dart';\", \"import 'package:flutter/material.dart';\nimport 'services/physical_bridge.dart';\nimport 'package:web_socket_channel/web_socket_channel.dart';\nimport 'dart:convert';\")
-                  # Просто добавляем вызов в main()
-                  if 'void main() {' in c:
-                      c = c.replace('void main() {', '''void main() {
-                        WidgetsFlutterBinding.ensureInitialized();
-                        final bridge = PhysicalBridge();
-                        bridge.startSensors();
-                        final channel = WebSocketChannel.connect(Uri.parse('ws://100.73.128.2:8000/api/physical/ws/phone_node'));
-                        bridge.sensors.listen((data) {
-                          channel.sink.add(jsonEncode({'type': 'sensors', 'data': [data]}));
-                        });
-                        channel.stream.listen((msg) {
-                          final d = jsonDecode(msg);
-                          if (d['type'] == 'action' && d['action'] == 'vibrate') {
-                            bridge.vibrate(d['params']?['ms'] ?? 500);
-                          }
-                        });''')
-                  with open(main_path, 'w', encoding='utf-8') as f: f.write(c)
+              with open('pubspec.yaml', 'w', encoding='utf-8') as f:
+                  f.write(pubspec)
 
-          # 3. Разрешаем Cleartext Traffic в AndroidManifest.xml
+          # 2. Patch main.dart
+          main_dart = 'lib/main.dart'
+          if os.path.exists(main_dart):
+              with open(main_dart, 'r', encoding='utf-8') as f:
+                  c = f.read()
+              if 'PhysicalBridge' not in c:
+                  c = c.replace("import 'package:flutter/material.dart';", "import 'package:flutter/material.dart';\nimport 'services/physical_bridge.dart';\nimport 'package:web_socket_channel/web_socket_channel.dart';\nimport 'dart:convert';")
+                  
+                  pattern = r'(void\s+main\s*\(\s*\)\s*(?:async\s*)?\{)'
+                  match = re.search(pattern, c)
+                  if match:
+                      init_code = '''
+            WidgetsFlutterBinding.ensureInitialized();
+            final bridge = PhysicalBridge();
+            bridge.startSensors();
+            final channel = WebSocketChannel.connect(Uri.parse('ws://100.73.128.2:8000/api/physical/ws/phone_node'));
+            bridge.sensors.listen((data) {
+              channel.sink.add(jsonEncode({'type': 'sensors', 'data': [data]}));
+            });
+            channel.stream.listen((msg) {
+              final d = jsonDecode(msg);
+              if (d['type'] == 'action' && d['action'] == 'vibrate') {
+                bridge.vibrate(d['params']?['ms'] ?? 500);
+              }
+            });
+            '''
+                      c = c[:match.end()] + init_code + c[match.end():]
+                  with open(main_dart, 'w', encoding='utf-8') as f:
+                      f.write(c)
+
+          # 3. Patch AndroidManifest.xml (Строго по стандартам XML)
           manifest_p = 'android/app/src/main/AndroidManifest.xml'
           if os.path.exists(manifest_p):
-              with open(manifest_p, 'r', encoding='utf-8') as f: m = f.read()
+              with open(manifest_p, 'r', encoding='utf-8') as f:
+                  m = f.read()
               if 'usesCleartextTraffic' not in m:
-                  m = m.replace('<application', '<application android:usesCleartextTraffic=\"true\"')
+                  m = re.sub(r'<application', r'<application android:usesCleartextTraffic="true"', m, count=1)
               if 'android.permission.INTERNET' not in m:
-                  m = m.replace('</manifest>', '<uses-permission android:name=\"android.permission.INTERNET\" />\n</manifest>')
-              with open(manifest_p, 'w', encoding='utf-8') as f: f.write(m)
-          "
+                  m = re.sub(r'</manifest>', r'<uses-permission android:name="android.permission.INTERNET" />\n</manifest>', m)
+              with open(manifest_p, 'w', encoding='utf-8') as f:
+                  f.write(m)
+          PYEOF
+          python3 patch_app.py
 
       - name: Install Flutter dependencies
         run: flutter pub get
