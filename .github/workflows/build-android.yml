@@ -172,68 +172,67 @@ jobs:
           }
           EOF
 
-      - name: Inject AI Agent, Sensors and Manifest Fix
+      - name: Inject Sensor Logic and Manifest Fix
         run: |
-          python3 -c "
+          cat << 'PYEOF' > patch_app.py
           import os
-          
-          # 1. Обновляем pubspec.yaml
-          with open('pubspec.yaml', 'r', encoding='utf-8') as f: pubspec = f.read()
+          import re
+
+          # 1. Patch pubspec.yaml
+          with open('pubspec.yaml', 'r', encoding='utf-8') as f:
+              pubspec = f.read()
           if 'url_launcher' not in pubspec:
               pubspec = pubspec.replace('dependencies:', 'dependencies:\n  url_launcher: ^6.2.5\n  web_socket_channel: ^2.4.0')
-              with open('pubspec.yaml', 'w', encoding='utf-8') as f: f.write(pubspec)
-          
-          # 2. Патчим main_screen.dart
-          p = 'lib/screens/main_screen.dart'
-          if os.path.exists(p):
-              with open(p, 'r', encoding='utf-8') as f: c = f.read()
-              if 'PhysicalBridge' not in c:
-                  c = c.replace(\"import 'package:flutter/material.dart';\", \"import 'package:flutter/material.dart';\nimport 'package:web_socket_channel/web_socket_channel.dart';\nimport '../services/physical_bridge.dart';\nimport 'dart:convert';\nimport 'package:url_launcher/url_launcher.dart';\")
-                  
-                  init_code = '''
-                  final bridge = PhysicalBridge();
-                  WebSocketChannel? channel;
-                  @override
-                  void initState() {
-                    super.initState();
-                    bridge.startSensors();
-                    channel = WebSocketChannel.connect(Uri.parse('ws://100.73.128.2:8000/api/physical/ws/phone_node'));
-                    bridge.sensors.listen((data) {
-                      channel?.sink.add(jsonEncode({'type': 'sensors', 'data': [data]}));
-                    });
-                    channel?.stream.listen((msg) {
-                      final d = jsonDecode(msg);
-                      if (d['type'] == 'action' && d['action'] == 'vibrate') {
-                        bridge.vibrate(d['params']?['ms'] ?? 500);
-                      }
-                    });
-                  }
-                  '''
-                  if 'void initState()' in c:
-                      c = c.replace('void initState() {', 'void initState() {\n' + init_code)
-                  else:
-                      c = c.replace('class _MainScreenState extends State<MainScreen> {', 'class _MainScreenState extends State<MainScreen> {\n' + init_code)
-                  
-                  # Добавляем кнопку в AppBar
-                  if 'actions: [' in c:
-                      c = c.replace('actions: [', '''actions: [
-                        IconButton(
-                          icon: const Icon(Icons.smart_toy),
-                          onPressed: () => launchUrl(Uri.parse('http://100.73.128.2:8000/app/')),
-                        ),''')
-                  
-                  with open(p, 'w', encoding='utf-8') as f: f.write(c)
+              with open('pubspec.yaml', 'w', encoding='utf-8') as f:
+                  f.write(pubspec)
 
-          # 3. Разрешаем Cleartext Traffic в AndroidManifest.xml
+          # 2. Patch main.dart (ГЛАВНЫЙ ФАЙЛ, а не экран)
+          main_dart = 'lib/main.dart'
+          if os.path.exists(main_dart):
+              with open(main_dart, 'r', encoding='utf-8') as f:
+                  c = f.read()
+              if 'physical_bridge.dart' not in c:
+                  c = c.replace("import 'package:flutter/material.dart';", "import 'package:flutter/material.dart';\nimport 'services/physical_bridge.dart';\nimport 'package:web_socket_channel/web_socket_channel.dart';\nimport 'dart:convert';")
+                  
+                  match = re.search(r'void\s+main\s*\(\s*\)\s*(?:async\s*)?\{', c)
+                  if match:
+                      if 'async' not in match.group(0):
+                          c = c.replace(match.group(0), 'void main() async {')
+                          match = re.search(r'void\s+main\s*\(\s*\)\s*async\s*\{', c)
+                      
+                      init_code = '''
+            WidgetsFlutterBinding.ensureInitialized();
+            final bridge = PhysicalBridge();
+            bridge.startSensors();
+            final channel = WebSocketChannel.connect(Uri.parse('ws://100.73.128.2:8000/api/physical/ws/phone_node'));
+            bridge.sensors.listen((data) {
+              channel.sink.add(jsonEncode({'type': 'sensors', 'data': [data]}));
+            });
+            channel.stream.listen((msg) {
+              final d = jsonDecode(msg);
+              if (d['type'] == 'action' && d['action'] == 'vibrate') {
+                bridge.vibrate(d['params']?['ms'] ?? 500);
+              }
+            });
+            '''
+                      c = c[:match.end()] + init_code + c[match.end():]
+                  
+                  with open(main_dart, 'w', encoding='utf-8') as f:
+                      f.write(c)
+
+          # 3. Patch AndroidManifest.xml (Разрешаем ws://)
           manifest_p = 'android/app/src/main/AndroidManifest.xml'
           if os.path.exists(manifest_p):
-              with open(manifest_p, 'r', encoding='utf-8') as f: m = f.read()
+              with open(manifest_p, 'r', encoding='utf-8') as f:
+                  m = f.read()
               if 'usesCleartextTraffic' not in m:
-                  m = m.replace('<application', '<application android:usesCleartextTraffic=\"true\"')
+                  m = m.replace('<application', '<application android:usesCleartextTraffic="true"')
               if 'android.permission.INTERNET' not in m:
-                  m = m.replace('</manifest>', '<uses-permission android:name=\"android.permission.INTERNET\" />\n</manifest>')
-              with open(manifest_p, 'w', encoding='utf-8') as f: f.write(m)
-          "
+                  m = m.replace('</manifest>', '<uses-permission android:name="android.permission.INTERNET" />\n</manifest>')
+              with open(manifest_p, 'w', encoding='utf-8') as f:
+                  f.write(m)
+          PYEOF
+          python3 patch_app.py
 
       - name: Install Flutter dependencies
         run: flutter pub get
