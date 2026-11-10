@@ -65,7 +65,6 @@ jobs:
                           f.write(content)
           "
 
-      # ⬇️ ГЕНЕРАЦИЯ НЕДОСТАЮЩИХ ФАЙЛОВ (DART И KOTLIN) ⬇️
       - name: Generate Physical Bridge Files
         run: |
           mkdir -p lib/services
@@ -173,15 +172,18 @@ jobs:
           }
           EOF
 
-      - name: Inject AI Agent and Sensors
+      - name: Inject AI Agent, Sensors and Manifest Fix
         run: |
           python3 -c "
           import os
+          
+          # 1. Обновляем pubspec.yaml
           with open('pubspec.yaml', 'r', encoding='utf-8') as f: pubspec = f.read()
           if 'url_launcher' not in pubspec:
               pubspec = pubspec.replace('dependencies:', 'dependencies:\n  url_launcher: ^6.2.5\n  web_socket_channel: ^2.4.0')
               with open('pubspec.yaml', 'w', encoding='utf-8') as f: f.write(pubspec)
           
+          # 2. Патчим main_screen.dart
           p = 'lib/screens/main_screen.dart'
           if os.path.exists(p):
               with open(p, 'r', encoding='utf-8') as f: c = f.read()
@@ -212,7 +214,25 @@ jobs:
                   else:
                       c = c.replace('class _MainScreenState extends State<MainScreen> {', 'class _MainScreenState extends State<MainScreen> {\n' + init_code)
                   
+                  # Добавляем кнопку в AppBar
+                  if 'actions: [' in c:
+                      c = c.replace('actions: [', '''actions: [
+                        IconButton(
+                          icon: const Icon(Icons.smart_toy),
+                          onPressed: () => launchUrl(Uri.parse('http://100.73.128.2:8000/app/')),
+                        ),''')
+                  
                   with open(p, 'w', encoding='utf-8') as f: f.write(c)
+
+          # 3. Разрешаем Cleartext Traffic в AndroidManifest.xml
+          manifest_p = 'android/app/src/main/AndroidManifest.xml'
+          if os.path.exists(manifest_p):
+              with open(manifest_p, 'r', encoding='utf-8') as f: m = f.read()
+              if 'usesCleartextTraffic' not in m:
+                  m = m.replace('<application', '<application android:usesCleartextTraffic=\"true\"')
+              if 'android.permission.INTERNET' not in m:
+                  m = m.replace('</manifest>', '<uses-permission android:name=\"android.permission.INTERNET\" />\n</manifest>')
+              with open(manifest_p, 'w', encoding='utf-8') as f: f.write(m)
           "
 
       - name: Install Flutter dependencies
